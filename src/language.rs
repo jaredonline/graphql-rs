@@ -1,12 +1,12 @@
 extern crate env_logger;
 
-struct Source {
+pub struct Source {
     body: String,
     name: Option<String>
 }
 
 impl Source {
-    fn new(body: &str) -> Source {
+    pub fn new(body: &str) -> Source {
         Source {
             body: body.to_string(),
             name: None
@@ -15,7 +15,7 @@ impl Source {
 }
 
 #[derive(PartialEq, Debug)]
-enum TokenKind {
+pub enum TokenKind {
     EOF,
     BANG,
     DOLLAR,
@@ -38,7 +38,7 @@ enum TokenKind {
 }
 
 #[derive(PartialEq, Debug)]
-struct Token {
+pub struct Token {
     kind: TokenKind,
     start: usize,
     end: usize,
@@ -65,20 +65,20 @@ impl Token {
     }
 }
 
-struct Lexer {
+pub struct Lexer {
     prev_position: usize,
     source: Source,
 }
 
 impl Lexer {
-    fn lex(source: Source) -> Lexer {
+    pub fn lex(source: Source) -> Lexer {
         Lexer {
             prev_position: 0,
             source: source,
         }
     }
 
-    fn next(&mut self, reset_position: Option<usize>) -> Token {
+    pub fn next(&mut self, reset_position: Option<usize>) -> Token {
         let token = match reset_position {
             Some(i) => Lexer::read_token(&self.source, i),
             None    => Lexer::read_token(&self.source, self.prev_position)
@@ -94,11 +94,9 @@ impl Lexer {
 
         let position = Lexer::position_after_whitespace(body, from_position);
         let mut bytes = body.bytes();
-        let code = bytes.nth(position);
+        let code = bytes.nth(position).unwrap();
 
-        match code {
-            Some(c) => {
-                match c {
+                match code {
                     // !
                     33 => Token::make_char(TokenKind::BANG, position),
                     // $
@@ -110,8 +108,8 @@ impl Lexer {
                     // .
                     46 => {
                         // test for ...
-                        let c1 = bytes.nth(position + 1).unwrap_or(0);
-                        let c2 = bytes.nth(position + 2).unwrap_or(0);
+                        let c1 = bytes.next().unwrap_or(0);
+                        let c2 = bytes.next().unwrap_or(0);
                         if (c1 == 46 && c2 == 46) {
                             Token::make(TokenKind::SPREAD, position, position + 3)
                         } else {
@@ -138,11 +136,65 @@ impl Lexer {
                     // A-Z _ a-z
                     65 ... 90 | 95 | 97 ... 122 => Lexer::read_name(source, position),
 
+                    // 0-9
+                    45 | 48 ... 57 => Lexer::read_number(source, position, code),
+
+                    // "
+                    34 => Lexer::read_string(source, position),
+
                     // TODO throw error
                     _ => Token::make(TokenKind::EOF, position, position)
                 }
+    }
+
+    fn read_string(source: &Source, start: usize) -> Token {
+        let ref body = source.body;
+        let mut position = start + 1;
+        let mut chunk_start = position;
+        let mut bytes = body.bytes();
+        let mut code = bytes.nth(position).unwrap();
+        let mut value = vec![];
+
+        while (
+            position < body.len() &&
+            code != 34 &&
+            code != 10 && code != 13 // TODO && code != 0x2028 && code != 0x2029
+        ) {
+            position += 1;
+            if code == 92 { // \
+                Lexer::push_bytes_to_byte_array(body, &mut value, chunk_start, position - 1);
+                code = bytes.next().unwrap();
+                match code {
+                    //34 | 47 | 92 | 98 | 102 | 110 | 114 | 116 => value.push(code),
+
+                    _ => { } // TODO throw
+                }
+                position += 1;
+                chunk_start = position;
             }
-            None => Token::make(TokenKind::EOF, position, position)
+            code = bytes.next().unwrap_or(0);
+        }
+
+        if code != 34 {
+            // TODO throw
+        }
+
+        Lexer::push_bytes_to_byte_array(body, &mut value, chunk_start, position);
+        Token {
+            kind: TokenKind::STRING,
+            start: start,
+            end: position + 1,
+            value: Some(String::from_utf8(value).unwrap())
+        }
+    }
+
+    fn push_bytes_to_byte_array(body: &String, target: &mut Vec<u8>, start: usize, end: usize) {
+        let mut bytes = body.bytes();
+        let mut i = start;
+        target.push(bytes.nth(start).unwrap());
+        while i < end - 1 {
+            i += 1;
+            target.push(bytes.next().unwrap());
         }
     }
 
@@ -166,22 +218,100 @@ impl Lexer {
             code = bytes.next().unwrap()
         }
 
-        // TODO: Figure out a better way to get a simple substring
-        let mut by = body.bytes();
-        let mut vec = vec![];
-        let mut i = position;
-        vec.push(by.nth(i).unwrap());
-        while (i < end - 1) {
-            vec.push(by.next().unwrap());
-            i += 1;
-        }
-        let string = String::from_utf8(vec).unwrap();
+        let string = Lexer::substring_from_body(body, position, end);
 
         Token {
             kind: TokenKind::NAME,
             start: position,
             end: end,
             value: Some(string)
+        }
+    }
+
+    fn substring_from_body(body: &String, start: usize, end: usize) -> String {
+        // TODO: Figure out a better way to get a simple substring
+        let mut bytes = body.bytes();
+        let mut vec = vec![];
+        let mut i = start;
+        vec.push(bytes.nth(i).unwrap());
+        while (i < end - 1) {
+            vec.push(bytes.next().unwrap());
+            i += 1;
+        }
+        String::from_utf8(vec).unwrap()
+    }
+
+    fn read_number(source: &Source, start: usize, first_code: u8) -> Token {
+        let ref body = source.body;
+        let mut bytes = body.bytes();
+        let mut code = bytes.nth(start).unwrap();
+        let mut position = start;
+        let mut is_float = false;
+
+        if code == 45 { // -
+            code = bytes.next().unwrap();
+            position += 1;
+        }
+
+        if code == 48 { // 0
+            code = bytes.next().unwrap_or(0);
+            position += 1;
+        } else if code >= 49 && code <= 57 { // 1 - 9
+            while code >= 48 && code <= 57 { // 0 - 9
+                code = bytes.next().unwrap_or(0);
+                position += 1;
+            }
+        } else {
+            // TODO: throw invalid number
+        }
+
+        if code == 46 { // .
+            is_float = true;
+
+            code = bytes.next().unwrap();
+            position += 1;
+
+            if code >= 48 && code <= 57 { // 0-9
+                while code >= 48 && code <= 57 {
+                    code = bytes.next().unwrap_or(0);
+                    position += 1;
+                }
+            } else {
+                // TODO throw invalid number
+            }
+        }
+
+        if code == 69 || code == 101 { // e or E
+            is_float = true;
+
+            code = bytes.next().unwrap();
+            position += 1;
+
+            if code == 43 || code == 45 { // + -
+                code = bytes.next().unwrap();
+                position += 1;
+            }
+
+            if code >= 48 && code <= 57 { // 0-9
+                while code >= 48 && code <= 57 {
+                    code = bytes.next().unwrap_or(0);
+                    position += 1;
+                }
+            } else {
+                // TODO throw invalid number
+            }
+        }
+
+        let kind = match is_float {
+            true => TokenKind::FLOAT,
+            false => TokenKind::INT
+        };
+
+        Token {
+            kind: kind,
+            start: start,
+            end: position,
+            value: Some(Lexer::substring_from_body(body, start, position))
         }
     }
 
@@ -210,7 +340,6 @@ impl Lexer {
                     }
                 },
                 None => {
-                    error!("did not unwrap char at {}!", position);
                     break
                 }
             }
@@ -220,53 +349,247 @@ impl Lexer {
     }
 
     fn is_whitespace(code: u8) -> bool {
-        code == 32 || code == 44 || code == 160 || code == 0x2028 || code == 0x2029 ||
+        code == 32 || code == 44 || code == 160 || // TODO:  code == 0x2028 || code == 0x2029 ||
         (code > 8 && code < 14)
     }
 }
 
-#[test]
-fn it_skips_whitespace() {
-    let _ = env_logger::init();
-    let mut lexer = Lexer::lex(Source::new("
+#[cfg(test)]
+mod test {
+    use env_logger;
+    use super::*;
 
-    foo
+    fn lex_one(body: &str) -> Token {
+        Lexer::lex(Source::new(body)).next(None)
+    }
 
-    "));
+    #[test]
+    fn it_skips_whitespace() {
+        //let _ = env_logger::init();
+        assert_eq!(lex_one("
 
-    let mut token = Token {
-        kind: TokenKind::NAME,
-        start: 6,
-        end: 9,
-        value: Some("foo".to_string())
-    };
+        foo
 
-    assert_eq!(lexer.next(None), token);
+        "),
+        Token {
+            kind: TokenKind::NAME,
+            start: 10,
+            end: 13,
+            value: Some("foo".to_string())
+        });
 
-    lexer = Lexer::lex(Source::new("
-    #comment
-    foo#comment
-    "));
+        assert_eq!(lex_one("
+        #comment
+        foo#comment
+        "),
+        Token {
+            kind: TokenKind::NAME,
+            start: 26,
+            end: 29,
+            value: Some("foo".to_string())
+        });
 
-    token = Token {
-        kind: TokenKind::NAME,
-        start: 18,
-        end: 21,
-        value: Some("foo".to_string())
-    };
+        assert_eq!(lex_one(",,,foo,,,,"),
+        Token {
+            kind: TokenKind::NAME,
+            start: 3,
+            end: 6,
+            value: Some("foo".to_string())
+        });
+    }
 
-    assert_eq!(lexer.next(None), token);
+    #[test]
+    fn it_lexes_numbers() {
+        //let _ = env_logger::init();
 
-    lexer = Lexer::lex(Source::new(",,,foo,,,"));
+        assert_eq!(lex_one("4"), Token {
+            kind: TokenKind::INT,
+            start: 0,
+            end: 1,
+            value: Some("4".to_string())
+        });
 
-    token = Token{
-        kind: TokenKind::NAME,
-        start: 3,
-        end: 6,
-        value: Some("foo".to_string())
-    };
+        assert_eq!(lex_one("4.123"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 5,
+            value: Some("4.123".to_string())
+        });
 
-    assert_eq!(lexer.next(None), token);
+        assert_eq!(lex_one("-4"), Token {
+            kind: TokenKind::INT,
+            start: 0,
+            end: 2,
+            value: Some("-4".to_string())
+        });
+
+        assert_eq!(lex_one("9"), Token {
+            kind: TokenKind::INT,
+            start: 0,
+            end: 1,
+            value: Some("9".to_string())
+        });
+
+        assert_eq!(lex_one("0"), Token {
+            kind: TokenKind::INT,
+            start: 0,
+            end: 1,
+            value: Some("0".to_string())
+        });
+
+        assert_eq!(lex_one("00"), Token {
+            kind: TokenKind::INT,
+            start: 0,
+            end: 1,
+            value: Some("0".to_string())
+        });
+
+        assert_eq!(lex_one("-4.123"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 6,
+            value: Some("-4.123".to_string())
+        });
+
+        assert_eq!(lex_one("0.123"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 5,
+            value: Some("0.123".to_string())
+        });
+
+        assert_eq!(lex_one("123e4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 5,
+            value: Some("123e4".to_string())
+        });
+
+        assert_eq!(lex_one("123E4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 5,
+            value: Some("123E4".to_string())
+        });
+
+        assert_eq!(lex_one("123e-4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 6,
+            value: Some("123e-4".to_string())
+        });
+
+        assert_eq!(lex_one("123e+4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 6,
+            value: Some("123e+4".to_string())
+        });
+
+        assert_eq!(lex_one("-1.123e4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 8,
+            value: Some("-1.123e4".to_string())
+        });
+
+        assert_eq!(lex_one("-1.123E4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 8,
+            value: Some("-1.123E4".to_string())
+        });
+
+        assert_eq!(lex_one("-1.123e-4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 9,
+            value: Some("-1.123e-4".to_string())
+        });
+
+        assert_eq!(lex_one("-1.123e+4"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 9,
+            value: Some("-1.123e+4".to_string())
+        });
+
+        assert_eq!(lex_one("-1.123e4567"), Token {
+            kind: TokenKind::FLOAT,
+            start: 0,
+            end: 11,
+            value: Some("-1.123e4567".to_string())
+        });
+
+    }
+
+    #[test]
+    fn it_lexes_punctuation() {
+        let _ = env_logger::init();
+
+        fn test_punct(punc: &str, kind: TokenKind) {
+            assert_eq!(lex_one(punc), Token {
+                kind: kind,
+                start: 0,
+                end: 1,
+                value: None
+            });
+        }
+
+        test_punct("!", TokenKind::BANG);
+        test_punct("$", TokenKind::DOLLAR);
+        test_punct("(", TokenKind::PAREN_L);
+        test_punct(")", TokenKind::PAREN_R);
+        assert_eq!(lex_one("..."), Token {
+            kind: TokenKind::SPREAD,
+            start: 0,
+            end: 3,
+            value: None
+        });
+        test_punct(":", TokenKind::COLON);
+        test_punct("=", TokenKind::EQUALS);
+        test_punct("@", TokenKind::AT);
+        test_punct("[", TokenKind::BRACKET_L);
+        test_punct("]", TokenKind::BRACKET_R);
+        test_punct("{", TokenKind::BRACE_L);
+        test_punct("}", TokenKind::BRACE_R);
+        test_punct("|", TokenKind::PIPE);
+    }
+
+    #[test]
+    fn it_lexes_strings() {
+        let _ = env_logger::init();
+
+        assert_eq!(lex_one("\"simple\""), Token {
+            kind: TokenKind::STRING,
+            start: 0,
+            end: 8,
+            value: Some("simple".to_string())
+        });
+
+        assert_eq!(lex_one(r#"" white space ""#), Token {
+            kind: TokenKind::STRING,
+            start: 0,
+            end: 15,
+            value: Some(" white space ".to_string())
+        });
+
+        assert_eq!(lex_one(r#""\"""#), Token {
+            kind: TokenKind::STRING,
+            start: 0,
+            end: 4,
+            value: Some(r#"\""#.to_string())
+        });
+
+        assert_eq!(lex_one(r#""quote \"""#), Token {
+            kind: TokenKind::STRING,
+            start: 0,
+            end: 10,
+            value: Some(r#"quote ""#.to_string())
+        });
+        
+        // TODO: A bunch more tests that are a pain in the ass
+    }
+
+    // TODO: exception based tests
 }
-
-// TODO: exception based tests
