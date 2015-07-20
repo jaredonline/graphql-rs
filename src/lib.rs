@@ -4,14 +4,14 @@ extern crate env_logger;
 
 pub mod language;
 
-enum AnyType {
+pub enum AnyType {
     Func,
     String,
     None,
     Integer,
 }
 
-struct Any {
+pub struct Any {
     _type:   AnyType,
     _func:   Option<Box<Fn(Any) -> Any>>,
     _string: Option<String>,
@@ -19,7 +19,7 @@ struct Any {
 }
 
 impl Any {
-    fn string(s: String) -> Any {
+    pub fn string(s: String) -> Any {
         Any {
             _type: AnyType::String,
             _func: None,
@@ -28,7 +28,7 @@ impl Any {
         }
     }
 
-    fn str(s: &str) -> Any {
+    pub fn str(s: &str) -> Any {
         Any {
             _type: AnyType::String,
             _func: None,
@@ -37,7 +37,7 @@ impl Any {
         }
     }
 
-    fn func(s: Box<Fn(Any) -> Any>) -> Any {
+    pub fn func(s: Box<Fn(Any) -> Any>) -> Any {
         Any {
             _type: AnyType::Func,
             _func: Some(s),
@@ -46,7 +46,7 @@ impl Any {
         }
     }
 
-    fn int(s: i32) -> Any {
+    pub fn int(s: i32) -> Any {
         Any {
             _type: AnyType::Integer,
             _func: None,
@@ -55,7 +55,7 @@ impl Any {
         }
     }
 
-    fn none() -> Any {
+    pub fn none() -> Any {
         Any {
             _type: AnyType::None,
             _func: None,
@@ -64,7 +64,7 @@ impl Any {
         }
     }
 
-    fn coerce_string(&self) -> Option<String> {
+    pub fn coerce_string(&self) -> Option<String> {
         match self._type {
             AnyType::String => {
                 self._string.clone()
@@ -73,7 +73,7 @@ impl Any {
         }
     }
 
-    fn coerce_int(&self) -> Option<i32> {
+    pub fn coerce_int(&self) -> Option<i32> {
         match self._type {
             AnyType::Integer => {
                 self._int
@@ -83,39 +83,44 @@ impl Any {
     }
 }
 
-struct Scalar<T> {
+pub struct Scalar<T> {
     name: String,
     description: String,
     coerce: Box<Fn(Any) -> Option<T>>
 }
 
 impl <T> Scalar<T> {
-    fn coerce(&self, value: Any) -> Option<T> {
+    pub fn coerce(&self, value: Any) -> Option<T> {
         let ref fun = self.coerce;
         fun(value)
     }
 }
 
-#[test]
-fn build_a_scalar() {
-    use Scalar;
+#[cfg(test)]
+mod test {
+    use super::*;
 
-    let scalar = Scalar {
-        name: "Int".to_string(),
-        description: "Integer scalar type.".to_string(),
-        coerce: Box::new(|val: Any| -> Option<i32> {
-            val.coerce_int()
-        }),
-        //coerce_literal: None,
-    };
+    #[test]
+    fn build_a_scalar() {
+        use Scalar;
 
-    assert_eq!(scalar.coerce(Any::str("Foo")), None);
-    assert_eq!(scalar.coerce(Any::int(1)), Some(1));
+        let scalar = Scalar {
+            name: "Int".to_string(),
+            description: "Integer scalar type.".to_string(),
+            coerce: Box::new(|val: Any| -> Option<i32> {
+                val.coerce_int()
+            }),
+            //coerce_literal: None,
+        };
 
-    //assert_eq!(config.name, "Int".to_string());
-    //assert_eq!(config.description.unwrap(), "Integer scalar type.".to_string());
-    //let coerce = config.coerce.unwrap();
-    //let val    = coerce(Any::str("Foo"));
-    //let st     = val.coerce_string().unwrap();
-    //assert_eq!(st, "Foo".to_string());
+        assert_eq!(scalar.coerce(Any::str("Foo")), None);
+        assert_eq!(scalar.coerce(Any::int(1)), Some(1));
+
+        //assert_eq!(config.name, "Int".to_string());
+        //assert_eq!(config.description.unwrap(), "Integer scalar type.".to_string());
+        //let coerce = config.coerce.unwrap();
+        //let val    = coerce(Any::str("Foo"));
+        //let st     = val.coerce_string().unwrap();
+        //assert_eq!(st, "Foo".to_string());
+    }
 }

@@ -1,4 +1,3 @@
-extern crate env_logger;
 
 pub struct Source {
     body: String,
@@ -17,24 +16,24 @@ impl Source {
 #[derive(PartialEq, Debug)]
 pub enum TokenKind {
     EOF,
-    BANG,
-    DOLLAR,
-    PAREN_L,
-    PAREN_R,
-    SPREAD,
-    COLON,
-    EQUALS,
-    AT,
-    BRACKET_L,
-    BRACKET_R,
-    BRACE_R,
-    BRACE_L,
-    PIPE,
-    NAME,
-    VARIABLE,
-    INT,
-    FLOAT,
-    STRING
+    Bang,
+    Dollar,
+    ParenL,
+    ParenR,
+    Spread,
+    Colon,
+    Equals,
+    At,
+    BracketL,
+    BracketR,
+    BraceR,
+    BraceL,
+    Pipe,
+    Name,
+    Variable,
+    Int,
+    Float,
+    String
 }
 
 #[derive(PartialEq, Debug)]
@@ -90,61 +89,59 @@ impl Lexer {
 
     fn read_token(source: &Source, from_position: usize) -> Token {
         let ref body = source.body;
-        let body_length = body.len();
 
         let position = Lexer::position_after_whitespace(body, from_position);
         let mut bytes = body.bytes();
         let code = bytes.nth(position).unwrap();
-
-                match code {
-                    // !
-                    33 => Token::make_char(TokenKind::BANG, position),
-                    // $
-                    36 => Token::make_char(TokenKind::DOLLAR, position),
-                    // (
-                    40 => Token::make_char(TokenKind::PAREN_L, position),
-                    // )
-                    41 => Token::make_char(TokenKind::PAREN_R, position),
-                    // .
-                    46 => {
-                        // test for ...
-                        let c1 = bytes.next().unwrap_or(0);
-                        let c2 = bytes.next().unwrap_or(0);
-                        if (c1 == 46 && c2 == 46) {
-                            Token::make(TokenKind::SPREAD, position, position + 3)
-                        } else {
-                            // TODO throw error
-                            Token::make(TokenKind::EOF, position, position)
-                        }
+            match code {
+                // !
+                33 => Token::make_char(TokenKind::Bang, position),
+                // $
+                36 => Token::make_char(TokenKind::Dollar, position),
+                // (
+                40 => Token::make_char(TokenKind::ParenL, position),
+                // )
+                41 => Token::make_char(TokenKind::ParenR, position),
+                // .
+                46 => {
+                    // test for ...
+                    let c1 = bytes.next().unwrap_or(0);
+                    let c2 = bytes.next().unwrap_or(0);
+                    if c1 == 46 && c2 == 46 {
+                        Token::make(TokenKind::Spread, position, position + 3)
+                    } else {
+                        // TODO throw error
+                        Token::make(TokenKind::EOF, position, position)
                     }
-                    // :
-                    58 => Token::make_char(TokenKind::COLON, position),
-                    // =
-                    61 => Token::make_char(TokenKind::EQUALS, position),
-                    // @
-                    64 => Token::make_char(TokenKind::AT, position),
-                    // [
-                    91 => Token::make_char(TokenKind::BRACKET_L, position),
-                    // ]
-                    93 => Token::make_char(TokenKind::BRACKET_R, position),
-                    // {
-                    123 => Token::make_char(TokenKind::BRACE_L, position),
-                    // |
-                    124 => Token::make_char(TokenKind::PIPE, position),
-                    // }
-                    125 => Token::make_char(TokenKind::BRACE_R, position),
-                    // A-Z _ a-z
-                    65 ... 90 | 95 | 97 ... 122 => Lexer::read_name(source, position),
-
-                    // 0-9
-                    45 | 48 ... 57 => Lexer::read_number(source, position, code),
-
-                    // "
-                    34 => Lexer::read_string(source, position),
-
-                    // TODO throw error
-                    _ => Token::make(TokenKind::EOF, position, position)
                 }
+                // :
+                58 => Token::make_char(TokenKind::Colon, position),
+                // =
+                61 => Token::make_char(TokenKind::Equals, position),
+                // @
+                64 => Token::make_char(TokenKind::At, position),
+                // [
+                91 => Token::make_char(TokenKind::BracketL, position),
+                // ]
+                93 => Token::make_char(TokenKind::BracketR, position),
+                // {
+                123 => Token::make_char(TokenKind::BraceL, position),
+                // |
+                124 => Token::make_char(TokenKind::Pipe, position),
+                // }
+                125 => Token::make_char(TokenKind::BraceR, position),
+                // A-Z _ a-z
+                65 ... 90 | 95 | 97 ... 122 => Lexer::read_name(source, position),
+
+                // 0-9
+                45 | 48 ... 57 => Lexer::read_number(source, position),
+
+                // "
+                34 => Lexer::read_string(source, position),
+
+                // TODO throw error
+                _ => Token::make(TokenKind::EOF, position, position)
+            }
     }
 
     fn read_string(source: &Source, start: usize) -> Token {
@@ -155,11 +152,11 @@ impl Lexer {
         let mut code = bytes.nth(position).unwrap();
         let mut value = vec![];
 
-        while (
+        while 
             position < body.len() &&
             code != 34 &&
             code != 10 && code != 13 // TODO && code != 0x2028 && code != 0x2029
-        ) {
+        {
             position += 1;
             if code == 92 { // \
                 Lexer::push_bytes_to_byte_array(body, &mut value, chunk_start, position - 1);
@@ -181,7 +178,7 @@ impl Lexer {
 
         Lexer::push_bytes_to_byte_array(body, &mut value, chunk_start, position);
         Token {
-            kind: TokenKind::STRING,
+            kind: TokenKind::String,
             start: start,
             end: position + 1,
             value: Some(String::from_utf8(value).unwrap())
@@ -203,9 +200,8 @@ impl Lexer {
         let mut bytes = body.bytes();
         let body_len = body.len();
         let mut end = position + 1;
-        let mut code = 0;
-        code = bytes.nth(end).unwrap();
-        while (
+        let mut code = bytes.nth(end).unwrap();
+        while 
             end != body_len &&
             (
                 code == 95 || // _
@@ -213,7 +209,7 @@ impl Lexer {
                 (code >= 65 && code <= 90) || // A-Z
                 (code >= 97 && code <= 122) // a-z
             )
-        ) {
+        {
             end += 1;
             code = bytes.next().unwrap()
         }
@@ -221,7 +217,7 @@ impl Lexer {
         let string = Lexer::substring_from_body(body, position, end);
 
         Token {
-            kind: TokenKind::NAME,
+            kind: TokenKind::Name,
             start: position,
             end: end,
             value: Some(string)
@@ -234,14 +230,14 @@ impl Lexer {
         let mut vec = vec![];
         let mut i = start;
         vec.push(bytes.nth(i).unwrap());
-        while (i < end - 1) {
+        while i < end - 1 {
             vec.push(bytes.next().unwrap());
             i += 1;
         }
         String::from_utf8(vec).unwrap()
     }
 
-    fn read_number(source: &Source, start: usize, first_code: u8) -> Token {
+    fn read_number(source: &Source, start: usize) -> Token {
         let ref body = source.body;
         let mut bytes = body.bytes();
         let mut code = bytes.nth(start).unwrap();
@@ -303,8 +299,8 @@ impl Lexer {
         }
 
         let kind = match is_float {
-            true => TokenKind::FLOAT,
-            false => TokenKind::INT
+            true => TokenKind::Float,
+            false => TokenKind::Int
         };
 
         Token {
@@ -321,17 +317,17 @@ impl Lexer {
         let mut bytes = body.bytes();
 
         let mut c = bytes.nth(position);
-        while (position < body_length) {
+        while position < body_length {
             match c {
                 Some(mut code) => {
                     if Lexer::is_whitespace(code) {
                         position += 1;
                     } else if code == 35 { // skip comments
                         position += 1;
-                        while (position < body_length) {
+                        while position < body_length {
                             code = bytes.next().unwrap();
                             position += 1;
-                            if (code == 10 || code == 13 || code == 0x2028 || code == 0x2029) {
+                            if code == 10 || code == 13 { // TODO || code == 0x2028 || code == 0x2029 {
                                 break;
                             }
                         }
@@ -372,7 +368,7 @@ mod test {
 
         "),
         Token {
-            kind: TokenKind::NAME,
+            kind: TokenKind::Name,
             start: 10,
             end: 13,
             value: Some("foo".to_string())
@@ -383,7 +379,7 @@ mod test {
         foo#comment
         "),
         Token {
-            kind: TokenKind::NAME,
+            kind: TokenKind::Name,
             start: 26,
             end: 29,
             value: Some("foo".to_string())
@@ -391,7 +387,7 @@ mod test {
 
         assert_eq!(lex_one(",,,foo,,,,"),
         Token {
-            kind: TokenKind::NAME,
+            kind: TokenKind::Name,
             start: 3,
             end: 6,
             value: Some("foo".to_string())
@@ -403,119 +399,119 @@ mod test {
         //let _ = env_logger::init();
 
         assert_eq!(lex_one("4"), Token {
-            kind: TokenKind::INT,
+            kind: TokenKind::Int,
             start: 0,
             end: 1,
             value: Some("4".to_string())
         });
 
         assert_eq!(lex_one("4.123"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 5,
             value: Some("4.123".to_string())
         });
 
         assert_eq!(lex_one("-4"), Token {
-            kind: TokenKind::INT,
+            kind: TokenKind::Int,
             start: 0,
             end: 2,
             value: Some("-4".to_string())
         });
 
         assert_eq!(lex_one("9"), Token {
-            kind: TokenKind::INT,
+            kind: TokenKind::Int,
             start: 0,
             end: 1,
             value: Some("9".to_string())
         });
 
         assert_eq!(lex_one("0"), Token {
-            kind: TokenKind::INT,
+            kind: TokenKind::Int,
             start: 0,
             end: 1,
             value: Some("0".to_string())
         });
 
         assert_eq!(lex_one("00"), Token {
-            kind: TokenKind::INT,
+            kind: TokenKind::Int,
             start: 0,
             end: 1,
             value: Some("0".to_string())
         });
 
         assert_eq!(lex_one("-4.123"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 6,
             value: Some("-4.123".to_string())
         });
 
         assert_eq!(lex_one("0.123"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 5,
             value: Some("0.123".to_string())
         });
 
         assert_eq!(lex_one("123e4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 5,
             value: Some("123e4".to_string())
         });
 
         assert_eq!(lex_one("123E4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 5,
             value: Some("123E4".to_string())
         });
 
         assert_eq!(lex_one("123e-4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 6,
             value: Some("123e-4".to_string())
         });
 
         assert_eq!(lex_one("123e+4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 6,
             value: Some("123e+4".to_string())
         });
 
         assert_eq!(lex_one("-1.123e4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 8,
             value: Some("-1.123e4".to_string())
         });
 
         assert_eq!(lex_one("-1.123E4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 8,
             value: Some("-1.123E4".to_string())
         });
 
         assert_eq!(lex_one("-1.123e-4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 9,
             value: Some("-1.123e-4".to_string())
         });
 
         assert_eq!(lex_one("-1.123e+4"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 9,
             value: Some("-1.123e+4".to_string())
         });
 
         assert_eq!(lex_one("-1.123e4567"), Token {
-            kind: TokenKind::FLOAT,
+            kind: TokenKind::Float,
             start: 0,
             end: 11,
             value: Some("-1.123e4567".to_string())
@@ -536,24 +532,24 @@ mod test {
             });
         }
 
-        test_punct("!", TokenKind::BANG);
-        test_punct("$", TokenKind::DOLLAR);
-        test_punct("(", TokenKind::PAREN_L);
-        test_punct(")", TokenKind::PAREN_R);
+        test_punct("!", TokenKind::Bang);
+        test_punct("$", TokenKind::Dollar);
+        test_punct("(", TokenKind::ParenL);
+        test_punct(")", TokenKind::ParenR);
         assert_eq!(lex_one("..."), Token {
-            kind: TokenKind::SPREAD,
+            kind: TokenKind::Spread,
             start: 0,
             end: 3,
             value: None
         });
-        test_punct(":", TokenKind::COLON);
-        test_punct("=", TokenKind::EQUALS);
-        test_punct("@", TokenKind::AT);
-        test_punct("[", TokenKind::BRACKET_L);
-        test_punct("]", TokenKind::BRACKET_R);
-        test_punct("{", TokenKind::BRACE_L);
-        test_punct("}", TokenKind::BRACE_R);
-        test_punct("|", TokenKind::PIPE);
+        test_punct(":", TokenKind::Colon);
+        test_punct("=", TokenKind::Equals);
+        test_punct("@", TokenKind::At);
+        test_punct("[", TokenKind::BracketL);
+        test_punct("]", TokenKind::BracketR);
+        test_punct("{", TokenKind::BraceL);
+        test_punct("}", TokenKind::BraceR);
+        test_punct("|", TokenKind::Pipe);
     }
 
     #[test]
@@ -561,28 +557,28 @@ mod test {
         let _ = env_logger::init();
 
         assert_eq!(lex_one("\"simple\""), Token {
-            kind: TokenKind::STRING,
+            kind: TokenKind::String,
             start: 0,
             end: 8,
             value: Some("simple".to_string())
         });
 
         assert_eq!(lex_one(r#"" white space ""#), Token {
-            kind: TokenKind::STRING,
+            kind: TokenKind::String,
             start: 0,
             end: 15,
             value: Some(" white space ".to_string())
         });
 
         assert_eq!(lex_one(r#""\"""#), Token {
-            kind: TokenKind::STRING,
+            kind: TokenKind::String,
             start: 0,
             end: 4,
             value: Some(r#"\""#.to_string())
         });
 
         assert_eq!(lex_one(r#""quote \"""#), Token {
-            kind: TokenKind::STRING,
+            kind: TokenKind::String,
             start: 0,
             end: 10,
             value: Some(r#"quote ""#.to_string())
