@@ -13,7 +13,7 @@ impl Source {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum TokenKind {
     EOF,
     Bang,
@@ -37,6 +37,13 @@ pub enum TokenKind {
 }
 
 #[derive(PartialEq, Debug)]
+pub enum NameKind {
+    Query,
+    Mutation,
+    Fragment
+}
+
+#[derive(PartialEq, Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub start: usize,
@@ -60,6 +67,23 @@ impl Token {
             start: start,
             end: start + 1,
             value: None
+        }
+    }
+
+    pub fn name_kind_from_value(&self) -> Option<NameKind> {
+        match self.value {
+            Some(ref v) => {
+                if *v == "mutation".to_string() {
+                    Some(NameKind::Mutation)
+                } else if *v == "query".to_string() {
+                    Some(NameKind::Query)
+                } else if *v == "fragment".to_string() {
+                    Some(NameKind::Fragment)
+                } else {
+                    None
+                }
+            },
+            None => None
         }
     }
 }

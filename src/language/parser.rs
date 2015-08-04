@@ -1,10 +1,15 @@
-use language::lexer::{Source, Lexer, Token, TokenKind};
-use language::ast::Document;
+use language::lexer::{Source, Lexer, Token, TokenKind, NameKind};
+use language::ast::{Document, Node, Directive, SelectionSet, Location, Selection, NamedType, Argument};
+use language::kinds::Kinds;
+
+use std::sync::RwLock;
 
 pub struct ParseOptions {
     no_source: Option<bool>,
     no_location: Option<bool>
 }
+
+type RwParser = RwLock<Parser>;
 
 pub struct Parser {
     lex_token: Lexer,
@@ -18,39 +23,193 @@ impl Parser {
     pub fn parse(source: Source, options: ParseOptions) -> Document {
         let mut lexer = Lexer::lex(source.clone());
         let token = lexer.next(None);
-        let parser = Parser {
+        let parser = RwLock::new(Parser {
             lex_token: lexer,
             source: source,
             options: options,
             prev_end: 0,
             token: token
-        };
-        Parser::parse_document(parser)
+        });
+        Parser::parse_document(&parser)
     }
 
-    fn parse_document(parser: Parser) -> Document {
-        let mut parser = parser;
-        let start = parser.token.start;
-        //let definitions = vec![];
+    fn parse_document(parser: &RwParser) -> Document {
+        let start = { parser.read().unwrap().token.start };
+        let mut definitions = vec![];
 
         // rust doesn't have do/while so we make our own
         let mut cont = true;
         while cont {
-            if Parser::peek(&parser, TokenKind::BraceL) {
-            } else if Parser::peek(&parser, TokenKind::NAME) {
+            if Parser::peek(parser, TokenKind::BraceL) {
+                definitions.push(Parser::parse_operation_definition(parser));
+            } else if Parser::peek(parser, TokenKind::Name) {
+                let name_kind = { parser.read().unwrap().token.name_kind_from_value() };
+                match name_kind {
+                    Some(s) => {
+                        match s {
+                            NameKind::Query | NameKind::Mutation => {
+                                definitions.push(Parser::parse_operation_definition(parser));
+                            },
+                            NameKind::Fragment => {
+                                definitions.push(Parser::parse_fragment_definition(parser));
+                            }
+                        };
+                    },
+                    None => { } // TODO throw
+                };
             } else {
                 // TODO throw
             }
-            cont = !Parser::skip(&mut parser, TokenKind::EOF);
+            cont = !(Parser::skip(parser, TokenKind::EOF));
         }
         Document
     }
 
-    fn skip(parser: &mut Parser, kind: TokenKind) -> bool {
-        error!("skip if {:?}", parser.token.kind);
-        match parser.token.kind == kind {
+    fn parse_operation_definition(parser: &RwParser) -> Node {
+        let start = { parser.read().unwrap().token.start };
+        if Parser::peek(parser, TokenKind::BraceL) {
+            Node {
+                kind: Kinds::OperationDefinition,
+                operation: "query".to_string(),
+                name: None,
+                variable_definitions: None,
+                directives: vec![],
+                selection_set: Parser::parse_selection_set(parser),
+                loc: Parser::loc(parser, start)
+            }
+        } else {
+            Node {
+                kind: Kinds::OperationDefinition,
+                operation: "query".to_string(),
+                name: None,
+                variable_definitions: None,
+                directives: vec![],
+                selection_set: Parser::parse_selection_set(parser),
+                loc: Parser::loc(parser, start)
+            }
+        }
+    }
+
+    fn parse_fragment_definition(parser: &RwParser) -> Node {
+        Node {
+            kind: Kinds::OperationDefinition,
+            operation: "query".to_string(),
+            name: None,
+            variable_definitions: None,
+            directives: vec![],
+            selection_set: Parser::parse_selection_set(parser),
+            loc: Parser::loc(parser, 0)
+        }
+    }
+
+    fn parse_selection_set(parser: &RwParser) -> SelectionSet {
+        let start = { parser.read().unwrap().token.start };
+        SelectionSet {
+            kind: Kinds::SelectionSet,
+            selections: Parser::many(parser, TokenKind::BraceL, |parser: &RwParser| -> Selection {
+                if Parser::peek(parser, TokenKind::Spread) {
+                    Parser::parse_fragment(parser)
+                } else {
+                    Parser::parse_field(parser)
+                }
+            }, TokenKind::BraceR),
+            loc: Parser::loc(parser, start)
+        }
+    }
+
+    fn parse_fragment(parser: &RwParser) -> Selection {
+        panic!("parse_fragment isn't implemented");
+        Parser::parse_field(parser)
+    }
+
+    fn parse_field(parser: &RwParser) -> Selection {
+        let start = { parser.read().unwrap().token.start };
+        let name_or_alias = Parser::parse_name(parser);
+        if Parser::skip(parser, TokenKind::Colon) {
+            Selection {
+                kind: Kinds::Field,
+                alias: Some(name_or_alias),
+                name: Parser::parse_name(parser),
+                arguments: Parser::parse_arguments(parser),
+                directives: Parser::parse_directives(parser),
+                selection_set: if Parser::peek(parser, TokenKind::BraceL) {
+                    Some(Parser::parse_selection_set(parser))
+                } else {
+                    None
+                },
+                loc: Parser::loc(parser, start)
+            }
+        } else {
+            Selection {
+                kind: Kinds::Field,
+                alias: None,
+                name: name_or_alias,
+                arguments: Parser::parse_arguments(parser),
+                directives: Parser::parse_directives(parser),
+                selection_set: if Parser::peek(parser, TokenKind::BraceL) {
+                    Some(Parser::parse_selection_set(parser))
+                } else {
+                    None
+                },
+                loc: Parser::loc(parser, start)
+            }
+        }
+    }
+
+    fn parse_arguments(parser: &RwParser) -> Vec<Argument> {
+        if Parser::peek(parser, TokenKind::ParenL) {
+            Parser::many(parser, TokenKind::ParenL, |parser: &RwParser| -> Argument {
+                panic!("not actually implemented (Closure in parse_arguments)");
+                Argument
+            }, TokenKind::ParenR)
+        } else {
+            vec![]
+        }
+    }
+
+    fn parse_name(parser: &RwParser) -> NamedType {
+        let token = Parser::expect(parser, TokenKind::Name);
+        NamedType {
+            kind: Kinds::Name,
+            value: token.value,
+            loc: Parser::loc(parser, token.start)
+        }
+    }
+
+    fn parse_directives(parser: &RwParser) -> Vec<Directive> {
+        vec![]
+    }
+
+    fn many<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
+        where F : Fn(&RwParser) -> T {
+        Parser::expect(parser, open_kind);
+        let mut nodes = vec![];
+
+        while !Parser::skip(parser, close_kind) {
+            nodes.push(parse_fn(parser));
+        }
+
+        return nodes;
+    }
+
+    fn expect(parser: &RwParser, kind: TokenKind) -> Token {
+        let token = { parser.read().unwrap().token.clone() };
+        if token.kind == kind {
+            Parser::advance(parser);
+            return token;
+        }
+
+        panic!("Expected {:?}, found {:?}", kind, token);
+    }
+
+    fn loc(parser: &RwParser, start: usize) -> Option<Location> {
+        Some(Location)
+    }
+
+    fn skip(parser: &RwParser, kind: TokenKind) -> bool {
+        let token_kind = { parser.read().unwrap().token.kind };
+        match token_kind == kind {
             true => {
-                error!("found {:?}", kind);
                 Parser::advance(parser);
                 true
             }
@@ -58,14 +217,15 @@ impl Parser {
         }
     }
 
-    fn advance(parser: &mut Parser) {
+    fn advance(parser: &RwParser) {
+        let mut parser = parser.write().unwrap();
         let prev_end = parser.token.end;
         parser.prev_end = prev_end;
         parser.token = parser.lex_token.next(None);
     }
 
-    fn peek(parser: &Parser, kind: TokenKind) -> bool {
-        parser.token.kind == kind
+    fn peek(parser: &RwParser, kind: TokenKind) -> bool {
+        parser.read().unwrap().token.kind == kind
     }
 }
 
