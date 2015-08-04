@@ -4,6 +4,7 @@ use language::kinds::Kinds;
 
 use std::sync::RwLock;
 
+#[derive(Clone)]
 pub struct ParseOptions {
     no_source: Option<bool>,
     no_location: Option<bool>
@@ -62,7 +63,11 @@ impl Parser {
             }
             cont = !(Parser::skip(parser, TokenKind::EOF));
         }
-        Document
+        Document {
+            kind: Kinds::Document,
+            loc: Parser::loc(parser, start),
+            definitions: definitions
+        }
     }
 
     fn parse_operation_definition(parser: &RwParser) -> Node {
@@ -177,6 +182,7 @@ impl Parser {
     }
 
     fn parse_directives(parser: &RwParser) -> Vec<Directive> {
+        //panic!("parse_directives isn't implemented");
         vec![]
     }
 
@@ -203,7 +209,22 @@ impl Parser {
     }
 
     fn loc(parser: &RwParser, start: usize) -> Option<Location> {
-        Some(Location)
+        let options = { parser.read().unwrap().options.clone() };
+        if options.no_location.unwrap_or(false) {
+            None
+        } else if options.no_source.unwrap_or(false) {
+            Some(Location {
+                start: start,
+                end: { parser.read().unwrap().prev_end },
+                source: None
+            })
+        } else {
+            Some(Location {
+                start: start,
+                end: { parser.read().unwrap().prev_end },
+                source: Some({ parser.read().unwrap().source.clone() })
+            })
+        }
     }
 
     fn skip(parser: &RwParser, kind: TokenKind) -> bool {
@@ -232,11 +253,47 @@ impl Parser {
 #[cfg(test)]
 mod test {
     use super::*;
-    use language::lexer::{Source};
+    use language::lexer::*;
+    use language::ast::*;
+    use language::kinds::*;
 
     #[test]
     fn it_accepts_option_to_not_include_source() {
         let source = Source::new("{ field }");
-        Parser::parse(source, ParseOptions { no_source: Some(true), no_location: None });
+        let goal = Document {
+            kind: Kinds::Document,
+            loc: Some(Location { start: 0, end: 9, source: None }),
+            definitions: vec![
+                Node {
+                    kind: Kinds::OperationDefinition,
+                    loc: Some(Location { start: 0, end: 9, source: None }),
+                    operation: "query".to_string(),
+                    name: None,
+                    variable_definitions: None,
+                    directives: vec![],
+                    selection_set: SelectionSet {
+                        kind: Kinds::SelectionSet,
+                        loc: Some(Location { start: 0, end: 9, source: None }),
+                        selections: vec![
+                            Selection {
+                                kind: Kinds::Field,
+                                loc: Some(Location { start: 2, end: 7, source: None }),
+                                alias: None,
+                                name: NamedType {
+                                    kind: Kinds::Name,
+                                    loc: Some(Location { start: 2, end: 7, source: None}),
+                                    value: Some("field".to_string())
+                                },
+                                arguments: vec![],
+                                directives: vec![],
+                                selection_set: None
+                            }
+                        ]
+                    }
+                }
+            ]
+        };
+        let document = Parser::parse(source, ParseOptions { no_source: Some(true), no_location: None });
+        assert_eq!(goal, document);
     }
 }
