@@ -57,10 +57,10 @@ impl Parser {
                             }
                         };
                     },
-                    None => { } // TODO throw
+                    None => { panic!("no name_kind?"); } // TODO throw
                 };
             } else {
-                // TODO throw
+                panic!("couldn't peek?");
             }
             cont = !(Parser::skip(parser, TokenKind::EOF));
         }
@@ -430,5 +430,19 @@ mod test {
     fn it_parses_variable_inline_values() {
         let source = Source::new("{ field(complex: { a: { b: [ $var ] } }) }");
         Parser::parse(source, ParseOptions { no_source: None, no_location: None });
+    }
+
+    #[test]
+    fn it_parsers_creates_ast() {
+        let source = Source::new("
+{
+    node(id: 4) {
+        id,
+        name
+    }
+}
+        ");
+
+        let result = Parser::parse(source, ParseOptions { no_source: None, no_location: None });
     }
 }
