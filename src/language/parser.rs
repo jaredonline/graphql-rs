@@ -1,8 +1,9 @@
 use language::lexer::{Source, Lexer, Token, TokenKind, NameKind};
-use language::ast::{Document, Node, Directive, SelectionSet, Location, Selection, NamedType, Argument};
+use language::ast::{Document, Node, Directive, SelectionSet, Location, Selection, NamedType, Argument, Value, ObjectField};
 use language::kinds::Kinds;
 
 use std::sync::RwLock;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ParseOptions {
@@ -164,11 +165,126 @@ impl Parser {
     fn parse_arguments(parser: &RwParser) -> Vec<Argument> {
         if Parser::peek(parser, TokenKind::ParenL) {
             Parser::many(parser, TokenKind::ParenL, |parser: &RwParser| -> Argument {
-                panic!("not actually implemented (Closure in parse_arguments)");
-                Argument
+                let start = { parser.read().unwrap().token.start };
+                Argument {
+                    kind: Kinds::Argument,
+                    name: Parser::parse_name(parser),
+                    value: { Parser::expect(parser, TokenKind::Colon); Parser::parse_value(parser, false) },
+                    loc: Parser::loc(parser, start)
+                }
             }, TokenKind::ParenR)
         } else {
             vec![]
+        }
+    }
+
+    fn parse_value(parser: &RwParser, is_const: bool) -> Value {
+        let token = { parser.read().unwrap().token.clone() };
+        let value = token.value;
+        match token.kind {
+            TokenKind::BracketL => Parser::parse_array(parser, is_const),
+            TokenKind::BraceL   => Parser::parse_object(parser, is_const),
+            TokenKind::Int      => {
+                Parser::advance(parser);
+                Value::IntValue {
+                    kind: Kinds::Int,
+                    value: value.clone().unwrap(),
+                    loc: Parser::loc(parser, token.start)
+                }
+            },
+            TokenKind::Float => {
+                Parser::advance(parser);
+                Value::FloatValue {
+                    kind: Kinds::Float,
+                    value: value.clone().unwrap(),
+                    loc: Parser::loc(parser, token.start)
+                }
+            },
+            TokenKind::String => {
+                Parser::advance(parser);
+                Value::StringValue {
+                    kind: Kinds::String,
+                    value: value.clone().unwrap(),
+                    loc: Parser::loc(parser, token.start)
+                }
+            },
+            TokenKind::Name  => {
+                if value.clone().unwrap_or("".to_string()) == "true".to_string() || value.clone().unwrap_or("".to_string()) == "false".to_string() {
+                    Parser::advance(parser);
+                    return Value::BooleanValue {
+                        kind: Kinds::Boolean,
+                        value: value.clone().unwrap() == "true".to_string(),
+                        loc: Parser::loc(parser, token.start)
+                    };
+                } else if value.clone().unwrap_or("".to_string()) != "null".to_string() {
+                    Parser::advance(parser);
+                    return Value::EnumValue {
+                        kind: Kinds::Enum,
+                        value: value.clone().unwrap(),
+                        loc: Parser::loc(parser, token.start)
+                    };
+                }
+                panic!("no value?");
+            },
+            TokenKind::Dollar => {
+                match is_const {
+                    true  => panic!("no value?"),
+                    false => Parser::parse_variable(parser, is_const)
+                }
+            }
+            _ => panic!("Unexpected token kind: {:?}", token.kind)
+        }
+    }
+
+    fn parse_array(parser: &RwParser, is_const: bool) -> Value {
+        let start = { parser.read().unwrap().token.start };
+        Value::ArrayValue {
+            kind: Kinds::Array,
+            values: Parser::any(parser, TokenKind::BracketL, |parser: &RwParser| -> Value {
+                return Parser::parse_value(parser, is_const);
+            }, TokenKind::BracketR),
+            loc: Parser::loc(parser, start),
+        }
+    }
+
+    fn parse_object(parser: &RwParser, is_const: bool) -> Value {
+        let start = { parser.read().unwrap().token.start };
+        Parser::expect(parser, TokenKind::BraceL);
+        let mut field_names : HashMap<String, bool> = HashMap::new();
+        let mut fields = vec![];
+        while !Parser::skip(parser, TokenKind::BraceR) {
+            fields.push(Parser::parse_object_field(parser, is_const, &mut field_names));
+        }
+        Value::ObjectValue {
+            kind: Kinds::Object,
+            fields: fields,
+            loc: Parser::loc(parser, start)
+        }
+    }
+
+    fn parse_object_field(parser: &RwParser, is_const: bool, field_names: &mut HashMap<String, bool>) -> ObjectField {
+        let start = { parser.read().unwrap().token.start };
+        let name = Parser::parse_name(parser);
+        let value = name.clone().value.unwrap();
+        if field_names.contains_key(&value) {
+            panic!("Duplicate input object field {:?}", name.value);
+        }
+        field_names.insert(value, true);
+        ObjectField {
+            kind: Kinds::ObjectField,
+            name: name,
+            value: { Parser::expect(parser, TokenKind::Colon); Parser::parse_value(parser, is_const) },
+            loc: Parser::loc(parser, start)
+        }
+    }
+
+    fn parse_variable(parser: &RwParser, is_const: bool) -> Value {
+        let start = { parser.read().unwrap().token.start };
+        Parser::expect(parser, TokenKind::Dollar);
+        Value::VariableValue {
+            kind: Kinds::Variable,
+            name: Parser::parse_name(parser),
+            loc: Parser::loc(parser, start)
         }
     }
 
@@ -186,10 +302,22 @@ impl Parser {
         vec![]
     }
 
-    fn many<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
+    fn any<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
         where F : Fn(&RwParser) -> T {
         Parser::expect(parser, open_kind);
         let mut nodes = vec![];
+
+        while !Parser::skip(parser, close_kind) {
+            nodes.push(parse_fn(parser));
+        }
+
+        return nodes;
+    }
+
+    fn many<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
+        where F : Fn(&RwParser) -> T {
+        Parser::expect(parser, open_kind);
+        let mut nodes = vec![parse_fn(parser)];
 
         while !Parser::skip(parser, close_kind) {
             nodes.push(parse_fn(parser));
@@ -205,7 +333,7 @@ impl Parser {
             return token;
         }
 
-        panic!("Expected {:?}, found {:?}", kind, token);
+        panic!("Expected {:?}, found {:?}", kind, token.kind);
     }
 
     fn loc(parser: &RwParser, start: usize) -> Option<Location> {
@@ -259,7 +387,6 @@ mod test {
 
     #[test]
     fn it_accepts_option_to_not_include_source() {
-        let source = Source::new("{ field }");
         let goal = Document {
             kind: Kinds::Document,
             loc: Some(Location { start: 0, end: 9, source: None }),
@@ -293,7 +420,15 @@ mod test {
                 }
             ]
         };
+
+        let source = Source::new("{ field }");
         let document = Parser::parse(source, ParseOptions { no_source: Some(true), no_location: None });
         assert_eq!(goal, document);
+    }
+
+    #[test]
+    fn it_parses_variable_inline_values() {
+        let source = Source::new("{ field(complex: { a: { b: [ $var ] } }) }");
+        Parser::parse(source, ParseOptions { no_source: None, no_location: None });
     }
 }

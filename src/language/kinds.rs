@@ -10,5 +10,17 @@ pub enum Kinds {
 
     Field,
 
-    Name
+    Argument,
+
+    Name,
+
+    Int,
+    Float,
+    String,
+    Boolean,
+    Enum,
+    Array,
+    Object,
+    ObjectField,
+    Variable
 }
