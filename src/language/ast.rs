@@ -1,11 +1,24 @@
 use language::kinds::Kinds;
 use language::lexer::Source;
 
-#[derive(PartialEq, Debug)]
+use std::fmt;
+use std::io::Write;
+
+#[derive(PartialEq)]
 pub struct Document {
     pub kind: Kinds,
     pub loc: Option<Location>,
     pub definitions: Vec<Node>
+}
+
+impl fmt::Debug for Document {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Document")
+            .field("kind", &self.kind)
+            .field("loc", &self.loc)
+            .field("definitions", &self.definitions)
+            .finish()
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -39,12 +52,19 @@ pub struct Selection {
     pub selection_set: Option<SelectionSet>,
     pub loc: Option<Location>
 }
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Clone)]
 pub struct Location {
     pub start: usize,
     pub end: usize,
     pub source: Option<Source>
 }
+
+impl fmt::Debug for Location {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({:?}, {:?})", self.start, self.end)
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct NamedType {
     pub kind: Kinds,

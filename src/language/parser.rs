@@ -385,30 +385,34 @@ mod test {
     use language::ast::*;
     use language::kinds::*;
 
+    fn loc_builder(start: usize, end: usize, source: Option<Source>) -> Option<Location> {
+        Some(Location { start: start, end: end, source: source })
+    }
+
     #[test]
     fn it_accepts_option_to_not_include_source() {
         let goal = Document {
             kind: Kinds::Document,
-            loc: Some(Location { start: 0, end: 9, source: None }),
+            loc: loc_builder(0, 9, None),
             definitions: vec![
                 Node {
                     kind: Kinds::OperationDefinition,
-                    loc: Some(Location { start: 0, end: 9, source: None }),
+                    loc: loc_builder(0, 9, None),
                     operation: "query".to_string(),
                     name: None,
                     variable_definitions: None,
                     directives: vec![],
                     selection_set: SelectionSet {
                         kind: Kinds::SelectionSet,
-                        loc: Some(Location { start: 0, end: 9, source: None }),
+                        loc: loc_builder(0, 9, None),
                         selections: vec![
                             Selection {
                                 kind: Kinds::Field,
-                                loc: Some(Location { start: 2, end: 7, source: None }),
+                                loc: loc_builder(2, 7, None),
                                 alias: None,
                                 name: NamedType {
                                     kind: Kinds::Name,
-                                    loc: Some(Location { start: 2, end: 7, source: None}),
+                                    loc: loc_builder(2, 7, None),
                                     value: Some("field".to_string())
                                 },
                                 arguments: vec![],
@@ -443,6 +447,88 @@ mod test {
 }
         ");
 
-        let result = Parser::parse(source, ParseOptions { no_source: None, no_location: None });
+        let result = Parser::parse(source.clone(), ParseOptions { no_source: None, no_location: None });
+
+        let goal = Document {
+            kind: Kinds::Document,
+            loc: loc_builder(1, 62, Some(source.clone())),
+            definitions: vec![
+                Node {
+                    kind: Kinds::OperationDefinition,
+                    loc: loc_builder(1, 53, Some(source.clone())),
+                    operation: "query".to_string(),
+                    name: None,
+                    variable_definitions: None,
+                    directives: vec![],
+                    selection_set: SelectionSet {
+                        kind: Kinds::SelectionSet,
+                        loc: loc_builder(1, 53, Some(source.clone())),
+                        selections: vec![
+                            Selection {
+                                kind: Kinds::Field,
+                                loc: loc_builder(7, 51, Some(source.clone())),
+                                alias: None,
+                                name: NamedType {
+                                    kind: Kinds::Name,
+                                    loc: loc_builder(7, 11, Some(source.clone())),
+                                    value: Some("node".to_string())
+                                },
+                                arguments: vec![
+                                    Argument {
+                                        kind: Kinds::Argument,
+                                        loc: loc_builder(12, 17, Some(source.clone())),
+                                        name: NamedType {
+                                            kind: Kinds::Name,
+                                            loc: loc_builder(12, 14, Some(source.clone())),
+                                            value: Some("id".to_string())
+                                        },
+                                        value: Value::IntValue {
+                                            kind: Kinds::Int,
+                                            loc: loc_builder(16, 17, Some(source.clone())),
+                                            value: "4".to_string()
+                                        }
+                                    }
+                                ],
+                                directives: vec![],
+                                selection_set: Some(SelectionSet {
+                                    kind: Kinds::SelectionSet,
+                                    loc: loc_builder(19, 51, Some(source.clone())),
+                                    selections: vec![
+                                        Selection {
+                                            kind: Kinds::Field,
+                                            loc: loc_builder(29, 31, Some(source.clone())),
+                                            alias: None,
+                                            name: NamedType {
+                                                kind: Kinds::Name,
+                                                loc: loc_builder(29, 31, Some(source.clone())),
+                                                value: Some("id".to_string())
+                                            },
+                                            arguments: vec![],
+                                            directives: vec![],
+                                            selection_set: None,
+                                        },
+                                        Selection {
+                                            kind: Kinds::Field,
+                                            loc: loc_builder(41, 45, Some(source.clone())),
+                                            alias: None,
+                                            name: NamedType {
+                                                kind: Kinds::Name,
+                                                loc: loc_builder(41, 45, Some(source.clone())),
+                                                value: Some("name".to_string())
+                                            },
+                                            arguments: vec![],
+                                            directives: vec![],
+                                            selection_set: None,
+                                        }
+                                    ],
+                                })
+                            }
+                        ]
+                    }
+                }
+            ]
+        };
+
+        assert_eq!(goal, result);
     }
 }
