@@ -7,8 +7,39 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ParseOptions {
-    no_source: Option<bool>,
-    no_location: Option<bool>
+    no_source: bool,
+    no_location: bool
+}
+
+impl ParseOptions {
+    pub fn new() -> ParseOptions {
+        ParseOptions {
+            no_source:   false,
+            no_location: false
+        }
+    }
+
+    pub fn no_source() -> ParseOptions {
+        ParseOptions {
+            no_source:   true,
+            no_location: false
+        }
+    }
+
+    pub fn no_location() -> ParseOptions {
+        ParseOptions {
+            no_source:   false,
+            no_location: true
+        }
+    }
+
+    pub fn set_location(&mut self, location: bool) {
+        self.no_location = location;
+    }
+
+    pub fn set_source(&mut self, source: bool) {
+        self.no_source = source;
+    }
 }
 
 type RwParser = RwLock<Parser>;
@@ -442,9 +473,9 @@ impl Parser {
 
     fn loc(parser: &RwParser, start: usize) -> Option<Location> {
         let options = { parser.read().unwrap().options.clone() };
-        if options.no_location.unwrap_or(false) {
+        if options.no_location {
             None
-        } else if options.no_source.unwrap_or(false) {
+        } else if options.no_source {
             Some(Location {
                 start: start,
                 end: { parser.read().unwrap().prev_end },
@@ -483,171 +514,36 @@ impl Parser {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-    use language::lexer::*;
-    use language::ast::*;
-    use language::kinds::*;
 
-    use std::io::Read;
-    use std::fs::File;
-    use env_logger;
-
-    fn loc_builder(start: usize, end: usize, source: Option<Source>) -> Option<Location> {
-        Some(Location { start: start, end: end, source: source })
+    #[test]
+    fn default_parse_options() {
+        let po = ParseOptions::new();
+        assert_eq!(po.no_location, false);
+        assert_eq!(po.no_source, false);
     }
 
     #[test]
-    fn it_accepts_option_to_not_include_source() {
-        let goal = Document {
-            kind: Kinds::Document,
-            loc: loc_builder(0, 9, None),
-            definitions: vec![
-                Definition::Operation {
-                    kind: Kinds::OperationDefinition,
-                    loc: loc_builder(0, 9, None),
-                    operation: "query".to_string(),
-                    name: None,
-                    variable_definitions: None,
-                    directives: vec![],
-                    selection_set: SelectionSet {
-                        kind: Kinds::SelectionSet,
-                        loc: loc_builder(0, 9, None),
-                        selections: vec![
-                            Selection::Field {
-                                kind: Kinds::Field,
-                                loc: loc_builder(2, 7, None),
-                                alias: None,
-                                name: Name {
-                                    kind: Kinds::Name,
-                                    loc: loc_builder(2, 7, None),
-                                    value: "field".to_string()
-                                },
-                                arguments: vec![],
-                                directives: vec![],
-                                selection_set: None
-                            }
-                        ]
-                    }
-                }
-            ]
-        };
-
-        let source = Source::new("{ field }");
-        let document = Parser::parse(source, ParseOptions { no_source: Some(true), no_location: None });
-        assert_eq!(goal, document);
+    fn no_location_parse_options() {
+        let po = ParseOptions::no_location();
+        assert_eq!(po.no_location, true);
+        assert_eq!(po.no_source, false);
     }
 
     #[test]
-    fn it_parses_variable_inline_values() {
-        let source = Source::new("{ field(complex: { a: { b: [ $var ] } }) }");
-        Parser::parse(source, ParseOptions { no_source: None, no_location: None });
+    fn no_source_parse_options() {
+        let po = ParseOptions::no_source();
+        assert_eq!(po.no_source, true);
+        assert_eq!(po.no_location, false);
     }
 
     #[test]
-    fn it_parses_the_kitchen_sink() {
-        let _ = env_logger::init();
-        let mut f = File::open("test_data/kitchen-sink.graphql").unwrap();
-        let mut s = String::new();
-        f.read_to_string(&mut s).unwrap();
-
-        let source = Source::new(s.trim());
-        Parser::parse(source, ParseOptions { no_source: None, no_location: None });
-    }
-
-    #[test]
-    fn it_parsers_creates_ast() {
-        let source = Source::new("
-{
-    node(id: 4) {
-        id,
-        name
-    }
-}
-        ");
-
-        let result = Parser::parse(source.clone(), ParseOptions { no_source: None, no_location: None });
-
-        let goal = Document {
-            kind: Kinds::Document,
-            loc: loc_builder(1, 62, Some(source.clone())),
-            definitions: vec![
-                Definition::Operation {
-                    kind: Kinds::OperationDefinition,
-                    loc: loc_builder(1, 53, Some(source.clone())),
-                    operation: "query".to_string(),
-                    name: None,
-                    variable_definitions: None,
-                    directives: vec![],
-                    selection_set: SelectionSet {
-                        kind: Kinds::SelectionSet,
-                        loc: loc_builder(1, 53, Some(source.clone())),
-                        selections: vec![
-                            Selection::Field {
-                                kind: Kinds::Field,
-                                loc: loc_builder(7, 51, Some(source.clone())),
-                                alias: None,
-                                name: Name {
-                                    kind: Kinds::Name,
-                                    loc: loc_builder(7, 11, Some(source.clone())),
-                                    value: "node".to_string()
-                                },
-                                arguments: vec![
-                                    Argument {
-                                        kind: Kinds::Argument,
-                                        loc: loc_builder(12, 17, Some(source.clone())),
-                                        name: Name {
-                                            kind: Kinds::Name,
-                                            loc: loc_builder(12, 14, Some(source.clone())),
-                                            value: "id".to_string()
-                                        },
-                                        value: Value::IntValue {
-                                            kind: Kinds::Int,
-                                            loc: loc_builder(16, 17, Some(source.clone())),
-                                            value: "4".to_string()
-                                        }
-                                    }
-                                ],
-                                directives: vec![],
-                                selection_set: Some(SelectionSet {
-                                    kind: Kinds::SelectionSet,
-                                    loc: loc_builder(19, 51, Some(source.clone())),
-                                    selections: vec![
-                                        Selection::Field {
-                                            kind: Kinds::Field,
-                                            loc: loc_builder(29, 31, Some(source.clone())),
-                                            alias: None,
-                                            name: Name {
-                                                kind: Kinds::Name,
-                                                loc: loc_builder(29, 31, Some(source.clone())),
-                                                value: "id".to_string()
-                                            },
-                                            arguments: vec![],
-                                            directives: vec![],
-                                            selection_set: None,
-                                        },
-                                        Selection::Field {
-                                            kind: Kinds::Field,
-                                            loc: loc_builder(41, 45, Some(source.clone())),
-                                            alias: None,
-                                            name: Name {
-                                                kind: Kinds::Name,
-                                                loc: loc_builder(41, 45, Some(source.clone())),
-                                                value: "name".to_string()
-                                            },
-                                            arguments: vec![],
-                                            directives: vec![],
-                                            selection_set: None,
-                                        }
-                                    ],
-                                })
-                            }
-                        ]
-                    }
-                }
-            ]
-        };
-
-        assert_eq!(goal, result);
+    fn parse_options_setters() {
+        let mut po = ParseOptions::new();
+        po.set_location(true);
+        po.set_source(true);
+        assert_eq!(po.no_source, true);
+        assert_eq!(po.no_location, true);
     }
 }
