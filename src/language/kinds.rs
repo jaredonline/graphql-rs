@@ -5,14 +5,22 @@ pub enum Kinds {
     OperationDefinition,
 
     FragmentDefinition,
+    VariableDefinition,
+
+    InlineFragment,
+    FragmentSpread,
 
     SelectionSet,
 
     Field,
+    Directive,
 
     Argument,
 
     Name,
+    NonNullType,
+    ListType,
+    NamedType,
 
     Int,
     Float,
