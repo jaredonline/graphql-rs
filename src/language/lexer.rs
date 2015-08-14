@@ -246,9 +246,9 @@ impl Lexer {
         let string = Lexer::substring_from_body(body, position, end);
 
         Token {
-            kind: TokenKind::Name,
+            kind:  TokenKind::Name,
             start: position,
-            end: end,
+            end:   end,
             value: Some(string)
         }
     }

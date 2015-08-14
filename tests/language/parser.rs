@@ -16,6 +16,32 @@ fn loc_builder(start: usize, end: usize, source: Option<Source>) -> Option<Locat
     Some(Location { start: start, end: end, source: source })
 }
 
+macro_rules! parse_no_source {
+    ($src:expr) => {
+        {
+            let source = Source::new($src);
+            Parser::parse(source, ParseOptions::no_source())
+        }
+    };
+}
+
+#[test]
+fn it_provides_useful_errors() {
+    let mut document;
+    document = parse_no_source!("notanoperation Foo { field }");
+    assert_eq!(true, document.is_err());
+    assert_eq!("Could not parse document, missing NameKind at location 0", document.err().unwrap().description);
+
+    document = parse_no_source!("
+{ ...MissingOn }
+fragment MissingOn Type
+");
+    assert_eq!(true, document.is_err());
+    assert_eq!("Expected 'on' and got 'Type'", document.err().unwrap().description);
+
+    // TODO finish these
+}
+
 #[test]
 fn it_accepts_option_to_not_include_source() {
     let goal = Document {
@@ -54,7 +80,7 @@ fn it_accepts_option_to_not_include_source() {
 
     let source = Source::new("{ field }");
     let document = Parser::parse(source, ParseOptions::no_source());
-    assert_eq!(goal, document);
+    assert_eq!(goal, document.ok().unwrap());
 }
 
 #[test]
@@ -167,5 +193,5 @@ fn it_parsers_creates_ast() {
         ]
     };
 
-    assert_eq!(goal, result);
+    assert_eq!(goal, result.ok().unwrap());
 }
