@@ -21,9 +21,8 @@ use language::errors::{
 use std::sync::RwLock;
 use std::collections::HashMap;
 use std::result::Result;
-use std::error::Error;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ParseOptions {
     no_source:   bool,
     no_location: bool
@@ -67,11 +66,6 @@ pub struct Parser {
     prev_end:  usize,
     token:     Token
 }
-type RwParser = RwLock<Parser>;
-
-struct InternalParser {
-    parser: RwParser
-}
 
 impl Parser {
     pub fn parse(source: Source, options: ParseOptions) -> Result<Document, ParseError> {
@@ -84,17 +78,60 @@ impl Parser {
             prev_end: 0,
             token: token
         });
-        Parser::parse_document(&parser)
+        InternalParser::parse(parser)
+    }
+}
+
+type RwParser = RwLock<Parser>;
+
+struct InternalParser {
+    parser: RwParser
+}
+
+impl InternalParser {
+    fn parse(parser: RwParser) -> Result<Document, ParseError> {
+        let ip = InternalParser {
+            parser: parser
+        };
+        ip.parse_document()
     }
 
-    fn parse_document(parser: &RwParser) -> Result<Document, ParseError> {
-        let start = { parser.read().unwrap().token.start };
+    // Helpers
+
+    fn start(&self) -> usize {
+        self.parser.read().unwrap().token.start
+    }
+
+    fn token_kind(&self) -> TokenKind {
+        self.parser.read().unwrap().token.kind
+    }
+
+    fn options(&self) -> ParseOptions {
+        self.parser.read().unwrap().options
+    }
+
+    fn prev_end(&self) -> usize {
+        self.parser.read().unwrap().prev_end
+    }
+
+    fn source_clone(&self) -> Source {
+        self.parser.read().unwrap().source.clone()
+    }
+
+    fn token_clone(&self) -> Token {
+        self.parser.read().unwrap().token.clone()
+    }
+
+    // Parsers
+
+    fn parse_document(&self) -> Result<Document, ParseError> {
+        let start = self.start();
         let mut definitions = vec![];
 
         // rust doesn't have do/while so we make our own
         let mut cont = true;
         while cont {
-            let definition = Parser::parse_definition(parser, start);
+            let definition = self.parse_definition(start);
             let mut ok_definition;
 
             if definition.is_ok() {
@@ -103,26 +140,26 @@ impl Parser {
                 return Err(definition.err().unwrap());
             }
             definitions.push(ok_definition);
-            cont = !Parser::skip(parser, TokenKind::EOF);
+            cont = !self.skip(TokenKind::EOF);
         }
 
         Ok(Document {
             kind: Kinds::Document,
-            loc: Parser::loc(parser, start),
+            loc: self.loc(start),
             definitions: definitions
         })
     }
 
-    fn parse_definition(parser: &RwParser, start: usize) -> Result<Definition, ParseError> {
-        if Parser::peek(parser, TokenKind::BraceL) {
-            Parser::parse_operation_definition(parser)
-        } else if Parser::peek(parser, TokenKind::Name) {
-            let name_kind = { parser.read().unwrap().token.name_kind_from_value() };
+    fn parse_definition(&self, start: usize) -> Result<Definition, ParseError> {
+        if self.peek(TokenKind::BraceL) {
+            self.parse_operation_definition()
+        } else if self.peek(TokenKind::Name) {
+            let name_kind = { self.parser.read().unwrap().token.name_kind_from_value() };
             match name_kind {
                 Some(s) => {
                     match s {
-                        NameKind::Query | NameKind::Mutation => { Parser::parse_operation_definition(parser) },
-                        NameKind::Fragment => { Parser::parse_fragment_definition(parser) }
+                        NameKind::Query | NameKind::Mutation => { self.parse_operation_definition() },
+                        NameKind::Fragment => { self.parse_fragment_definition() }
                     }
                 },
                 None => {
@@ -134,30 +171,30 @@ impl Parser {
         }
     }
 
-    fn parse_operation_definition(parser: &RwParser) -> Result<Definition, ParseError> {
-        let start = { parser.read().unwrap().token.start };
-        if Parser::peek(parser, TokenKind::BraceL) {
+    fn parse_operation_definition(&self) -> Result<Definition, ParseError> {
+        let start = self.start();
+        if self.peek(TokenKind::BraceL) {
             Ok(Definition::Operation {
                 kind: Kinds::OperationDefinition,
                 operation: "query".to_string(),
                 name: None,
                 variable_definitions: None,
                 directives: vec![],
-                selection_set: Parser::parse_selection_set(parser),
-                loc: Parser::loc(parser, start)
+                selection_set: self.parse_selection_set(),
+                loc: self.loc(start)
             })
         } else {
-            match Parser::expect(parser, TokenKind::Name) {
+            match self.expect(TokenKind::Name) {
                 Ok(ot) => {
                     let operation = ot.value;
                     Ok(Definition::Operation {
                         kind: Kinds::OperationDefinition,
                         operation: operation.unwrap(),
-                        name: Some(Parser::parse_name(parser)),
-                        variable_definitions: Some(Parser::parse_variable_definitions(parser)),
-                        directives: Parser::parse_directives(parser),
-                        selection_set: Parser::parse_selection_set(parser),
-                        loc: Parser::loc(parser, start)
+                        name: Some(self.parse_name()),
+                        variable_definitions: Some(self.parse_variable_definitions()),
+                        directives: self.parse_directives(),
+                        selection_set: self.parse_selection_set(),
+                        loc: self.loc(start)
                     })
                 },
                 Err(e) => Err(e)
@@ -165,69 +202,13 @@ impl Parser {
         }
     }
 
-    fn parse_variable_definitions(parser: &RwParser) -> Vec<VariableDefinition> {
-        if Parser::peek(parser, TokenKind::ParenL) {
-            Parser::many(parser, TokenKind::ParenL, |parser: &RwParser| -> VariableDefinition {
-                let start = { parser.read().unwrap().token.start };
-                VariableDefinition {
-                    kind: Kinds::VariableDefinition,
-                    variable: Parser::parse_variable(parser),
-                    var_type: { Parser::expect(parser, TokenKind::Colon); Parser::parse_type(parser) },
-                    default_value: match Parser::skip(parser, TokenKind::Equals) {
-                        true => Some(Parser::parse_value(parser, true)),
-                        false => None
-                    },
-                    loc: Parser::loc(parser, start)
-                }
-            }, TokenKind::ParenR)
-        } else {
-            vec![]
-        }
-    }
-
-    fn parse_type(parser: &RwParser) -> Type {
-        let start = { parser.read().unwrap().token.start };
-        let mut _type;
-
-        if Parser::skip(parser, TokenKind::BracketL) {
-            let temp_type = Box::new(Parser::parse_type(parser));
-            Parser::expect(parser, TokenKind::BracketR);
-            _type = Type::List {
-                kind: Kinds::ListType,
-                t_type: temp_type,
-                loc: Parser::loc(parser, start)
-            }
-        } else {
-            _type = Parser::parse_named_type(parser);
-        }
-
-        if Parser::skip(parser, TokenKind::Bang) {
-            return Type::NonNull {
-                kind: Kinds::NonNullType,
-                t_type: Box::new(_type),
-                loc: Parser::loc(parser, start)
-            };
-        }
-
-        return _type;
-    }
-
-    fn parse_named_type(parser: &RwParser) -> Type {
-        let start = { parser.read().unwrap().token.start };
-        Type::Named {
-            kind: Kinds::NamedType,
-            name: Parser::parse_name(parser),
-            loc: Parser::loc(parser, start)
-        }
-    }
-
-    fn parse_fragment_definition(parser: &RwParser) -> Result<Definition, ParseError> {
-        let start = { parser.read().unwrap().token.start };
-        match Parser::expect_keyword(parser, "fragment") {
+    fn parse_fragment_definition(&self) -> Result<Definition, ParseError> {
+        let start = self.start();
+        match self.expect_keyword("fragment") {
             Ok(_) => {
-                let name = Parser::parse_fragment_name(parser);
-                let type_condition = match Parser::expect_keyword(parser, "on") {
-                    Ok(_)  => Ok(Parser::parse_named_type(parser)),
+                let name = self.parse_fragment_name();
+                let type_condition = match self.expect_keyword("on") {
+                    Ok(_)  => Ok(self.parse_named_type()),
                     Err(e) => Err(e)
                 };
                 match type_condition {
@@ -235,9 +216,9 @@ impl Parser {
                         kind: Kinds::FragmentDefinition,
                         name: name,
                         type_condition: tc,
-                        directives: Some(Parser::parse_directives(parser)),
-                        selection_set: Parser::parse_selection_set(parser),
-                        loc: Parser::loc(parser, start)
+                        directives: Some(self.parse_directives()),
+                        selection_set: self.parse_selection_set(),
+                        loc: self.loc(start)
                     }),
                     Err(e) => Err(e)
                 }
@@ -246,60 +227,53 @@ impl Parser {
         }
     }
 
-    fn parse_selection_set(parser: &RwParser) -> SelectionSet {
-        let start = { parser.read().unwrap().token.start };
+    fn parse_selection_set(&self) -> SelectionSet {
+        let start = self.start();
         SelectionSet {
             kind: Kinds::SelectionSet,
-            selections: Parser::many(parser, TokenKind::BraceL, |parser: &RwParser| -> Selection {
-                if Parser::peek(parser, TokenKind::Spread) {
-                    Parser::parse_fragment(parser)
+            selections: self.many(TokenKind::BraceL, || -> Selection {
+                if self.peek(TokenKind::Spread) {
+                    self.parse_fragment()
                 } else {
-                    Parser::parse_field(parser)
+                    self.parse_field()
                 }
             }, TokenKind::BraceR),
-            loc: Parser::loc(parser, start)
+            loc: self.loc(start)
         }
     }
 
-    fn parse_fragment(parser: &RwParser) -> Selection {
-        let start = { parser.read().unwrap().token.start };
-        Parser::expect(parser, TokenKind::Spread);
-        let value = { parser.read().unwrap().token.clone().value.unwrap_or("".to_string()) };
+    fn parse_fragment(&self) -> Selection {
+        let start = self.start();
+        let _ = self.expect(TokenKind::Spread);
+        let token = self.token_clone();
+        let value = token.clone().value.unwrap_or("".to_string());
         if value == "on".to_string() {
-            Parser::advance(parser);
+            self.advance();
             Selection::InlineFragment {
                 kind: Kinds::InlineFragment,
-                type_condition: Parser::parse_named_type(parser),
-                directives: Some(Parser::parse_directives(parser)),
-                selection_set: Parser::parse_selection_set(parser),
-                loc: Parser::loc(parser, start)
+                type_condition: self.parse_named_type(),
+                directives: Some(self.parse_directives()),
+                selection_set: self.parse_selection_set(),
+                loc: self.loc(start)
             }
         } else {
             Selection::FragmentSpread {
                 kind: Kinds::FragmentSpread,
-                name: Parser::parse_fragment_name(parser),
-                directives: Some(Parser::parse_directives(parser)),
-                loc: Parser::loc(parser, start),
+                name: self.parse_fragment_name(),
+                directives: Some(self.parse_directives()),
+                loc: self.loc(start),
             }
         }
     }
-    
-    fn parse_fragment_name(parser: &RwParser) -> Name {
-        let value = { parser.read().unwrap().token.clone().value.unwrap_or("".to_string()) };
-        if value == "on".to_string() {
-            panic!("not supposed ot be 'on'");
-        }
-        Parser::parse_name(parser)
-    }
 
-    fn parse_field(parser: &RwParser) -> Selection {
-        let start = { parser.read().unwrap().token.start };
-        let name_or_alias = Parser::parse_name(parser);
+    fn parse_field(&self) -> Selection {
+        let start = self.start();
+        let name_or_alias = self.parse_name();
         let mut alias;
         let mut name;
-        if Parser::skip(parser, TokenKind::Colon) {
+        if self.skip(TokenKind::Colon) {
             alias = Some(name_or_alias);
-            name  = Parser::parse_name(parser);
+            name  = self.parse_name();
         } else {
             alias = None;
             name  = name_or_alias;
@@ -309,26 +283,39 @@ impl Parser {
             kind: Kinds::Field,
             alias: alias,
             name: name,
-            arguments: Parser::parse_arguments(parser),
-            directives: Parser::parse_directives(parser),
-            selection_set: if Parser::peek(parser, TokenKind::BraceL) {
-                Some(Parser::parse_selection_set(parser))
+            arguments: self.parse_arguments(),
+            directives: self.parse_directives(),
+            selection_set: if self.peek(TokenKind::BraceL) {
+                Some(self.parse_selection_set())
             } else {
                 None
             },
-            loc: Parser::loc(parser, start)
+            loc: self.loc(start)
         }
     }
 
-    fn parse_arguments(parser: &RwParser) -> Vec<Argument> {
-        if Parser::peek(parser, TokenKind::ParenL) {
-            Parser::many(parser, TokenKind::ParenL, |parser: &RwParser| -> Argument {
-                let start = { parser.read().unwrap().token.start };
+    fn parse_name(&self) -> Name {
+        match self.expect(TokenKind::Name) {
+            Ok(token) => {
+                Name {
+                    kind: Kinds::Name,
+                    value: token.value.unwrap(),
+                    loc: self.loc(token.start)
+                }
+            },
+            _ => { panic!("expected Name, found... something else") }
+        }
+    }
+
+    fn parse_arguments(&self) -> Vec<Argument> {
+        if self.peek(TokenKind::ParenL) {
+            self.many(TokenKind::ParenL, || -> Argument {
+                let start = self.start();
                 Argument {
                     kind: Kinds::Argument,
-                    name: Parser::parse_name(parser),
-                    value: { Parser::expect(parser, TokenKind::Colon); Parser::parse_value(parser, false) },
-                    loc: Parser::loc(parser, start)
+                    name: self.parse_name(),
+                    value: { let _ = self.expect(TokenKind::Colon); self.parse_value(false) },
+                    loc: self.loc(start)
                 }
             }, TokenKind::ParenR)
         } else {
@@ -336,50 +323,96 @@ impl Parser {
         }
     }
 
-    fn parse_value(parser: &RwParser, is_const: bool) -> Value {
-        let token = { parser.read().unwrap().token.clone() };
+    fn parse_variable_definitions(&self) -> Vec<VariableDefinition> {
+        if self.peek(TokenKind::ParenL) {
+            self.many(TokenKind::ParenL, || -> VariableDefinition {
+                let start = self.start();
+                VariableDefinition {
+                    kind: Kinds::VariableDefinition,
+                    variable: self.parse_variable(),
+                    var_type: { let _ = self.expect(TokenKind::Colon); self.parse_type() },
+                    default_value: match self.skip(TokenKind::Equals) {
+                        true => Some(self.parse_value(true)),
+                        false => None
+                    },
+                    loc: self.loc(start)
+                }
+            }, TokenKind::ParenR)
+        } else {
+            vec![]
+        }
+    }
+
+    fn parse_directives(&self) -> Vec<Directive> {
+        let mut directives = vec![];
+        while self.peek(TokenKind::At) {
+            directives.push(self.parse_directive());
+        }
+        return directives;
+    }
+
+    fn parse_fragment_name(&self) -> Name {
+        let token = self.token_clone();
+        let value = token.clone().value.unwrap_or("".to_string());
+        if value == "on".to_string() {
+            panic!("not supposed ot be 'on'");
+        }
+        self.parse_name()
+    }
+
+    fn parse_named_type(&self) -> Type {
+        let start = self.start();
+        Type::Named {
+            kind: Kinds::NamedType,
+            name: self.parse_name(),
+            loc: self.loc(start)
+        }
+    }
+
+    fn parse_value(&self, is_const: bool) -> Value {
+        let token = self.token_clone();
         let value = token.value;
         match token.kind {
-            TokenKind::BracketL => Parser::parse_array(parser, is_const),
-            TokenKind::BraceL   => Parser::parse_object(parser, is_const),
+            TokenKind::BracketL => self.parse_array(is_const),
+            TokenKind::BraceL   => self.parse_object(is_const),
             TokenKind::Int      => {
-                Parser::advance(parser);
+                self.advance();
                 Value::IntValue {
                     kind: Kinds::Int,
                     value: value.clone().unwrap(),
-                    loc: Parser::loc(parser, token.start)
+                    loc: self.loc(token.start)
                 }
             },
             TokenKind::Float => {
-                Parser::advance(parser);
+                self.advance();
                 Value::FloatValue {
                     kind: Kinds::Float,
                     value: value.clone().unwrap(),
-                    loc: Parser::loc(parser, token.start)
+                    loc: self.loc(token.start)
                 }
             },
             TokenKind::String => {
-                Parser::advance(parser);
+                self.advance();
                 Value::StringValue {
                     kind: Kinds::String,
                     value: value.clone().unwrap(),
-                    loc: Parser::loc(parser, token.start)
+                    loc: self.loc(token.start)
                 }
             },
             TokenKind::Name  => {
                 if value.clone().unwrap_or("".to_string()) == "true".to_string() || value.clone().unwrap_or("".to_string()) == "false".to_string() {
-                    Parser::advance(parser);
+                    self.advance();
                     return Value::BooleanValue {
                         kind: Kinds::Boolean,
                         value: value.clone().unwrap() == "true".to_string(),
-                        loc: Parser::loc(parser, token.start)
+                        loc: self.loc(token.start)
                     };
                 } else if value.clone().unwrap_or("".to_string()) != "null".to_string() {
-                    Parser::advance(parser);
+                    self.advance();
                     return Value::EnumValue {
                         kind: Kinds::Enum,
                         value: value.clone().unwrap(),
-                        loc: Parser::loc(parser, token.start)
+                        loc: self.loc(token.start)
                     };
                 }
                 panic!("no value?");
@@ -387,42 +420,90 @@ impl Parser {
             TokenKind::Dollar => {
                 match is_const {
                     true  => panic!("no value?"),
-                    false => Parser::parse_variable(parser)
+                    false => self.parse_variable()
                 }
             }
             _ => panic!("Unexpected token kind: {:?}", token.kind)
         }
     }
 
-    fn parse_array(parser: &RwParser, is_const: bool) -> Value {
-        let start = { parser.read().unwrap().token.start };
-        Value::ArrayValue {
-            kind: Kinds::Array,
-            values: Parser::any(parser, TokenKind::BracketL, |parser: &RwParser| -> Value {
-                return Parser::parse_value(parser, is_const);
-            }, TokenKind::BracketR),
-            loc: Parser::loc(parser, start),
+    fn parse_variable(&self) -> Value {
+        let start = self.start();
+        let _ = self.expect(TokenKind::Dollar);
+        Value::VariableValue {
+            kind: Kinds::Variable,
+            name: self.parse_name(),
+            loc: self.loc(start)
         }
     }
 
-    fn parse_object(parser: &RwParser, is_const: bool) -> Value {
-        let start = { parser.read().unwrap().token.start };
-        Parser::expect(parser, TokenKind::BraceL);
+    fn parse_type(&self) -> Type {
+        let start = self.start();
+        let mut _type;
+
+        if self.skip(TokenKind::BracketL) {
+            let temp_type = Box::new(self.parse_type());
+            let _ = self.expect(TokenKind::BracketR);
+            _type = Type::List {
+                kind: Kinds::ListType,
+                t_type: temp_type,
+                loc: self.loc(start)
+            }
+        } else {
+            _type = self.parse_named_type();
+        }
+
+        if self.skip(TokenKind::Bang) {
+            return Type::NonNull {
+                kind: Kinds::NonNullType,
+                t_type: Box::new(_type),
+                loc: self.loc(start)
+            };
+        }
+
+        return _type;
+    }
+
+    fn parse_directive(&self) -> Directive {
+        let start = self.start();
+        let _ = self.expect(TokenKind::At);
+        Directive {
+            kind: Kinds::Directive,
+            name: self.parse_name(),
+            arguments: Some(self.parse_arguments()),
+            loc: self.loc(start)
+        }
+    }
+
+    fn parse_array(&self, is_const: bool) -> Value {
+        let start = self.start();
+        Value::ArrayValue {
+            kind: Kinds::Array,
+            values: self.any(TokenKind::BracketL, || -> Value {
+                self.parse_value(is_const)
+            }, TokenKind::BracketR),
+            loc: self.loc(start),
+        }
+    }
+
+    fn parse_object(&self, is_const: bool) -> Value {
+        let start = self.start();
+        let _ = self.expect(TokenKind::BraceL);
         let mut field_names : HashMap<String, bool> = HashMap::new();
         let mut fields = vec![];
-        while !Parser::skip(parser, TokenKind::BraceR) {
-            fields.push(Parser::parse_object_field(parser, is_const, &mut field_names));
+        while !self.skip(TokenKind::BraceR) {
+            fields.push(self.parse_object_field(is_const, &mut field_names));
         }
         Value::ObjectValue {
             kind: Kinds::Object,
             fields: fields,
-            loc: Parser::loc(parser, start)
+            loc: self.loc(start)
         }
     }
 
-    fn parse_object_field(parser: &RwParser, is_const: bool, field_names: &mut HashMap<String, bool>) -> ObjectField {
-        let start = { parser.read().unwrap().token.start };
-        let parsed_name = Parser::parse_name(parser);
+    fn parse_object_field(&self, is_const: bool, field_names: &mut HashMap<String, bool>) -> ObjectField {
+        let start = self.start();
+        let parsed_name = self.parse_name();
         let value = parsed_name.value.clone();
         if field_names.contains_key(&value) {
             panic!("Duplicate input object field {:?}", value);
@@ -431,137 +512,96 @@ impl Parser {
         ObjectField {
             kind: Kinds::ObjectField,
             name: parsed_name,
-            value: { Parser::expect(parser, TokenKind::Colon); Parser::parse_value(parser, is_const) },
-            loc: Parser::loc(parser, start)
+            value: { let _ = self.expect(TokenKind::Colon); self.parse_value(is_const) },
+            loc: self.loc(start)
         }
     }
 
-    fn parse_variable(parser: &RwParser) -> Value {
-        let start = { parser.read().unwrap().token.start };
-        Parser::expect(parser, TokenKind::Dollar);
-        Value::VariableValue {
-            kind: Kinds::Variable,
-            name: Parser::parse_name(parser),
-            loc: Parser::loc(parser, start)
+
+    // Iteration
+    fn many<T, F>(&self, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
+        where F : Fn() -> T {
+        let _ = self.expect(open_kind);
+        let mut nodes = vec![parse_fn()];
+
+        while !self.skip(close_kind) {
+            nodes.push(parse_fn());
         }
+
+        return nodes;
     }
 
-    fn parse_name(parser: &RwParser) -> Name {
-        match Parser::expect(parser, TokenKind::Name) {
-            Ok(token) => {
-                Name {
-                    kind: Kinds::Name,
-                    value: token.value.unwrap(),
-                    loc: Parser::loc(parser, token.start)
-                }
-            },
-            _ => { panic!("expected Name, found... something else") }
-        }
-    }
-
-    fn parse_directives(parser: &RwParser) -> Vec<Directive> {
-        let mut directives = vec![];
-        while Parser::peek(parser, TokenKind::At) {
-            directives.push(Parser::parse_directive(parser));
-        }
-        return directives;
-    }
-
-    fn parse_directive(parser: &RwParser) -> Directive {
-        let start = { parser.read().unwrap().token.start };
-        Parser::expect(parser, TokenKind::At);
-        Directive {
-            kind: Kinds::Directive,
-            name: Parser::parse_name(parser),
-            arguments: Some(Parser::parse_arguments(parser)),
-            loc: Parser::loc(parser, start)
-        }
-    }
-
-    fn any<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
-        where F : Fn(&RwParser) -> T {
-        Parser::expect(parser, open_kind);
+    fn any<T, F>(&self, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
+        where F : Fn() -> T {
+        let _ = self.expect(open_kind);
         let mut nodes = vec![];
 
-        while !Parser::skip(parser, close_kind) {
-            nodes.push(parse_fn(parser));
+        while !self.skip(close_kind) {
+            nodes.push(parse_fn());
         }
 
         return nodes;
     }
 
-    fn many<T, F>(parser: &RwParser, open_kind: TokenKind, parse_fn: F, close_kind: TokenKind) -> Vec<T>
-        where F : Fn(&RwParser) -> T {
-        Parser::expect(parser, open_kind);
-        let mut nodes = vec![parse_fn(parser)];
-
-        while !Parser::skip(parser, close_kind) {
-            nodes.push(parse_fn(parser));
-        }
-
-        return nodes;
-    }
-
-    fn expect_keyword(parser: &RwParser, keyword: &str) -> Result<Token, ParseError> { 
-        let token = { parser.read().unwrap().token.clone() };
-        let value = token.value.clone().unwrap_or("".to_string());
-        if token.kind == TokenKind::Name && value == keyword.to_string() {
-            Parser::advance(parser);
-            return Ok(token);
-        }
-
-        parse_error!("Expected '{}' and got '{}'", keyword, value)
-    }
-
-    fn expect(parser: &RwParser, kind: TokenKind) -> Result<Token, ParseError> {
-        let token = { parser.read().unwrap().token.clone() };
-        if token.kind == kind {
-            Parser::advance(parser);
-            return Ok(token);
-        }
-
-        parse_error!("Expected {:?}, found {:?}", kind, token.kind)
-    }
-
-    fn loc(parser: &RwParser, start: usize) -> Option<Location> {
-        let options = { parser.read().unwrap().options.clone() };
-        if options.no_location {
+    // Introspection
+    fn loc(&self, start: usize) -> Option<Location> {
+        if self.options().no_location {
             None
-        } else if options.no_source {
+        } else if self.options().no_source {
             Some(Location {
                 start: start,
-                end: { parser.read().unwrap().prev_end },
+                end: self.prev_end(),
                 source: None
             })
         } else {
             Some(Location {
                 start: start,
-                end: { parser.read().unwrap().prev_end },
-                source: Some({ parser.read().unwrap().source.clone() })
+                end: self.prev_end(),
+                source: Some(self.source_clone())
             })
         }
     }
+    
+    fn peek(&self, kind: TokenKind) -> bool {
+        self.parser.read().unwrap().token.kind == kind
+    }
 
-    fn skip(parser: &RwParser, kind: TokenKind) -> bool {
-        let token_kind = { parser.read().unwrap().token.kind };
-        match token_kind == kind {
+    fn skip(&self, kind: TokenKind) -> bool {
+        match self.token_kind() == kind {
             true => {
-                Parser::advance(parser);
+                self.advance();
                 true
             }
             _ => false
         }
     }
 
-    fn advance(parser: &RwParser) {
-        let mut parser = parser.write().unwrap();
+    fn expect_keyword(&self, keyword: &str) -> Result<Token, ParseError> { 
+        let token = self.token_clone();
+        let value = token.value.clone().unwrap_or("".to_string());
+        if token.kind == TokenKind::Name && value == keyword.to_string() {
+            self.advance();
+            return Ok(token);
+        }
+
+        parse_error!("Expected '{}' and got '{}'", keyword, value)
+    }
+
+    fn expect(&self, kind: TokenKind) -> Result<Token, ParseError> {
+        let token = self.token_clone();
+        if token.kind == kind {
+            self.advance();
+            return Ok(token);
+        }
+
+        parse_error!("Expected {:?}, found {:?}", kind, token.kind)
+    }
+
+    fn advance(&self) {
+        let mut parser = self.parser.write().unwrap();
         let prev_end = parser.token.end;
         parser.prev_end = prev_end;
         parser.token = parser.lex_token.next(None);
-    }
-
-    fn peek(parser: &RwParser, kind: TokenKind) -> bool {
-        parser.read().unwrap().token.kind == kind
     }
 }
 

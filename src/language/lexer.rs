@@ -6,8 +6,12 @@ pub struct Source {
 
 impl Source {
     pub fn new(body: &str) -> Source {
+        Source::from(String::from(body))
+    }
+
+    pub fn from(body: String) -> Source {
         Source {
-            body: body.to_string(),
+            body: body,
             name: None
         }
     }

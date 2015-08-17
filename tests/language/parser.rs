@@ -40,6 +40,8 @@ fragment MissingOn Type
     assert_eq!("Expected 'on' and got 'Type'", document.err().unwrap().description);
 
     // TODO finish these
+    //document = parse_no_source!("{ field: {} }");
+    //assert_eq!(true, document.is_err());
 }
 
 #[test]
@@ -86,7 +88,7 @@ fn it_accepts_option_to_not_include_source() {
 #[test]
 fn it_parses_variable_inline_values() {
     let source = Source::new("{ field(complex: { a: { b: [ $var ] } }) }");
-    Parser::parse(source, ParseOptions::new());
+    let _ = Parser::parse(source, ParseOptions::new());
 }
 
 #[test]
@@ -97,7 +99,7 @@ fn it_parses_the_kitchen_sink() {
     f.read_to_string(&mut s).unwrap();
 
     let source = Source::new(s.trim());
-    Parser::parse(source, ParseOptions::new());
+    let _ = Parser::parse(source, ParseOptions::new());
 }
 
 #[test]
